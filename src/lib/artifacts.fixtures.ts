@@ -28,7 +28,7 @@ export const fixtureAgent: ResolvedProfile = {
   is_me: true,
   member_kind: "agent",
   metadata: [{ name: "role", value: "group assistant" }],
-  name: "Convos Agent",
+  name: "Webmaster",
   source: "app_data",
 };
 

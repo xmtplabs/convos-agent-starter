@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildPinnedSiteUrl,
+  requiredEnvironment,
+  requiredUrl,
+} from "./site-location.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const gitUrl = requiredEnvironment("CODE_STORAGE_GIT_URL");
@@ -18,25 +23,6 @@ if (
   throw new Error(
     "CODE_STORAGE_GIT_URL must be an HTTPS URL without embedded credentials",
   );
-}
-
-function requiredEnvironment(name) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`set ${name} before deploying`);
-  return value;
-}
-
-function requiredUrl(name) {
-  const value = requiredEnvironment(name);
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error();
-    }
-    return url;
-  } catch {
-    throw new Error(`${name} must be an absolute URL`);
-  }
 }
 
 function redact(value) {
@@ -183,8 +169,5 @@ if (
   );
 }
 
-const siteUrl = new URL(
-  `/sites/${encodeURIComponent(instanceId)}/`,
-  publicBaseUrl,
-);
+const siteUrl = buildPinnedSiteUrl(publicBaseUrl, instanceId);
 console.log(siteUrl.href);

@@ -1050,7 +1050,7 @@ var worker_entry_default = { async fetch(request, env, ctx) {
 		return new Response("invalid site base path", { status: 400 });
 	}
 	const requestHandler = createRequestHandler({
-		...await import("./assets/server-build-RaYT_loL.js"),
+		...await import("./assets/server-build-CzWyBx23.js"),
 		basename: basePath
 	}, "production");
 	const routerContext = new RouterContextProvider();

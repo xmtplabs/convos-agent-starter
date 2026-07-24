@@ -12,6 +12,7 @@
     "deploy": "node scripts/deploy.mjs",
     "dev": "vite",
     "preview:platform": "pnpm build && node scripts/prepare-platform-preview.mjs && wrangler dev --config wrangler.preview.jsonc",
+    "site:url": "node scripts/print-site-url.mjs",
     "test": "node --test scripts/*.test.mjs",
     "typecheck": "react-router typegen && tsc --project tsconfig.json",
     "ui:add": "node scripts/add-ui-component.mjs"

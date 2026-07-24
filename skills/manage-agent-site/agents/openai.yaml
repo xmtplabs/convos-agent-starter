@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage Agent Site"
+  short_description: "Build, test, and publish the group site"
+  default_prompt: "Use $manage-agent-site to update and publish our group website."
