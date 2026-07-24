@@ -70,6 +70,8 @@ The important source files are:
 - `src/lib/artifacts-api.ts`: typed `artifacts.internal` client.
 - `src/lib/artifacts.types.ts`: capability data types.
 - `src/lib/artifacts.fixtures.ts`: local-development sample data only.
+- `src/lib/google-maps-public.ts`: intentionally public, domain-restricted
+  Google Maps browser configuration.
 - `src/components/ui/`: locally owned shadcn/ui primitives.
 - `src/styles/globals.css`: Tailwind import and semantic theme variables.
 - `workers/app.ts`: production React Router Worker adapter.
@@ -125,7 +127,9 @@ site automatically.
   [photo-gallery.tsx](references/photo-gallery.tsx).
 - For dated milestones, progress, and status in chronological order, read
   [timeline.tsx](references/timeline.tsx).
-- For a map image with accessible numbered points of reference, read
+- For an interactive Google Map with exact coordinates and an accessible point
+  list, read [google-map-points.tsx](references/google-map-points.tsx).
+- For a provider-neutral map image with accessible numbered points, read
   [point-map.tsx](references/point-map.tsx).
 - For selectable cards that deliver a vote to the agent through a React Router
   action, read
