@@ -14,7 +14,7 @@
     "preview:platform": "pnpm build && node scripts/prepare-platform-preview.mjs && wrangler dev --config wrangler.preview.jsonc",
     "site:url": "node scripts/print-site-url.mjs",
     "test": "node --test scripts/*.test.mjs",
-    "typecheck": "react-router typegen && tsc --project tsconfig.json",
+    "typecheck": "react-router typegen && tsc --project tsconfig.json && tsc --project tsconfig.skill-examples.json",
     "ui:add": "node scripts/add-ui-component.mjs"
   },
   "dependencies": {

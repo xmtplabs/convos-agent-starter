@@ -81,6 +81,28 @@ pnpm ui:add -- <component-name>
 This command owns the generated source, restricts changes to configured paths,
 and exact-pins any dependency it introduces. Inspect its diff before use.
 
+### Load a component recipe only when needed
+
+The skill includes complete, typechecked recipes for common rich responses.
+Read only the reference matching the user's request, then copy and adapt it
+under `src/`; these reference files are examples and are not bundled into the
+site automatically.
+
+- For posters, movie titles, theaters, formats, and showtimes, read
+  [movie-showtimes.tsx](references/movie-showtimes.tsx).
+- For departure and arrival times, airports, gates, duration, and status, read
+  [flight-details.tsx](references/flight-details.tsx).
+- For a map image with accessible numbered points of reference, read
+  [point-map.tsx](references/point-map.tsx).
+- For selectable cards that deliver a vote to the agent through a React Router
+  action, read
+  [voting-cards-route.tsx](references/voting-cards-route.tsx).
+
+Replace sample data and placeholder URLs with loader-provided data. Preserve
+the recipes' responsive layout, semantic times, image alt text, keyboard
+behavior, server-only capability calls, and explicit empty/error states. The
+voting recipe is message-based feedback, not authenticated one-person-one-vote.
+
 Keep every route valid under both platform mount shapes:
 
 - `/sites/:instance_id/...`

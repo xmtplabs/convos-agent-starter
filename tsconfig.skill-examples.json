@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    ".react-router/types/**/*",
+    "skills/manage-agent-site/references/*.tsx",
+    "src/components/ui/**/*",
+    "src/lib/**/*",
+    "worker-configuration.d.ts"
+  ]
+}
