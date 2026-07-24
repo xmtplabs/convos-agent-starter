@@ -240,20 +240,27 @@ Use `pnpm dev` for the short feedback loop and `pnpm preview:platform` for the
 final platform-compatibility check. Do not use `wrangler deploy`; this
 application is deployed as a bundle inside the assistant Worker.
 
+Before validation or deployment, stop the exact dev and platform-preview
+processes you started through their terminal session or recorded PID. Do not
+leave Vite, Wrangler, or workerd previews competing with the production build.
+Never use broad cleanup commands such as `pkill node` or `killall`.
+
 ## Validate
 
-Before publishing, run:
+After source changes have stabilized, run:
 
 ```bash
 pnpm check
-pnpm build
 git diff --check
 git status --short
 ```
 
 `pnpm check` runs React Router type generation, TypeScript, and unit tests.
-`pnpm build` bundles client and server code and rejects missing, stale,
-oversized, unsafe, or hash-mismatched artifacts. The platform limits the
+Run it once after the last relevant source, test, TypeScript, package, or
+configuration change. If it already passed and none of those inputs changed,
+do not repeat it. The deployment command performs the clean production build
+and rejects missing, stale, oversized, unsafe, or hash-mismatched artifacts, so
+do not run `pnpm build` immediately before deploying. The platform limits the
 manifest to 1,000 files total, so keep the application bundled instead of
 generating many small static files.
 
@@ -279,7 +286,7 @@ workspace change, so remove temporary files and do not proceed when unrelated
 or suspicious changes are present.
 
 ```bash
-pnpm deploy
+pnpm run deploy
 ```
 
 This single command:
@@ -295,8 +302,16 @@ This single command:
 It prints the live pinned URL only after the new commit returns HTTP 200 from
 `GET /` and activation succeeds. A failed build, push, materialization, or
 validation leaves the previous pinned commit live. Fix the reported error and
-run `pnpm deploy` again; do not bypass activation with a manual Git push or raw
-runtime request.
+run `pnpm run deploy` again; do not bypass activation with a manual Git push or
+raw runtime request. Never use `pnpm deploy`: pnpm reserves that shorthand for
+its unrelated workspace-deploy command.
+
+Run the deployment directly with the terminal tool and a 300-second timeout.
+Do not pipe it through `tail`, because a successful `tail` can hide the deploy
+command's nonzero exit status. The script reports timings for its build,
+staging, commit, push, and activation phases, followed by artifact reuse,
+download, upload, and validation metrics. Use those timings to diagnose a slow
+or failed deployment instead of rerunning it speculatively.
 
 After success, request the printed URL and report the live outcome concisely.
 Use the printed URL rather than constructing one from environment values.
