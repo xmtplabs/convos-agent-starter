@@ -1,2 +1,5 @@
-node_modules
-AGENTS.md
+node_modules/
+.react-router/
+.wrangler/
+.dev.vars
+.preview/
