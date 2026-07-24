@@ -43,6 +43,22 @@ This validates the runtime-provided public base URL and instance ID, makes no
 network request, and prints only the public pinned URL. Use its exact output;
 do not inspect environment variables or reconstruct the URL by hand.
 
+## Interpret limited instructions
+
+Read the current root, affected routes, theme, and relevant components before
+choosing an approach. Identify the audience, the page's primary purpose or
+action, authoritative facts available from the user or loaders, and useful
+behavior that should remain.
+
+Choose one coherent interpretation and implement it completely. Make reasonable
+decisions about layout, spacing, color, and copy without asking. Ask only when
+missing information would materially change the site's purpose, expose private
+information, or require inventing important facts. Prefer a focused edit over a
+rewrite when the request is narrow.
+
+Never publish invented dates, prices, locations, availability, testimonials,
+statistics, or real-world status. Clearly label intentional demonstration data.
+
 ## Know the project
 
 The important source files are:
@@ -72,6 +88,17 @@ Preserve the semantic theme tokens in `src/styles/globals.css`, responsive
 layouts, keyboard behavior, visible focus states, and useful empty, loading,
 and error states. Use real labels and accessible names for controls.
 
+Give every page a clear primary message, an obvious next action when one exists,
+and supporting content ordered by importance. Avoid a grid of equally weighted
+cards when the content has a natural hierarchy; use cards only for genuinely
+distinct objects or choices.
+
+Use a restrained type scale, consistent spacing, and one clear accent treatment.
+Prefer composition and whitespace over decorative effects. Avoid generic
+landing-page filler, excessive pills, glowing gradients, vague hero copy, and
+repeating the same container treatment around every section. Make narrow-screen
+layouts intentional instead of merely wrapping the desktop layout.
+
 Add one missing shadcn component deliberately with:
 
 ```bash
@@ -92,6 +119,12 @@ site automatically.
   [movie-showtimes.tsx](references/movie-showtimes.tsx).
 - For departure and arrival times, airports, gates, duration, and status, read
   [flight-details.tsx](references/flight-details.tsx).
+- For multi-day agendas with semantic times, locations, speakers, and session
+  status, read [event-schedule.tsx](references/event-schedule.tsx).
+- For a responsive image grid with captions and an accessible lightbox, read
+  [photo-gallery.tsx](references/photo-gallery.tsx).
+- For dated milestones, progress, and status in chronological order, read
+  [timeline.tsx](references/timeline.tsx).
 - For a map image with accessible numbered points of reference, read
   [point-map.tsx](references/point-map.tsx).
 - For selectable cards that deliver a vote to the agent through a React Router
@@ -131,6 +164,11 @@ Never import `artifacts.server.ts` from a client-only module and never call
 hostname only for server-side Worker fetches. Production never falls back to
 fixtures.
 
+Treat user-provided and loader data as authoritative. Derive display formatting
+only when the transformation is deterministic. Do not expose conversation IDs,
+inbox IDs, arbitrary metadata, internal errors, or implementation details unless
+the user specifically requests them.
+
 The typed client supports:
 
 - `bootstrap()` for group info, assistant profile, and member profiles together.
@@ -144,6 +182,12 @@ caused by an intentional user mutation; never mutate during render, module
 initialization, or a loader. Give every event a meaningful, stable idempotency
 key so retries do not create duplicate agent turns.
 
+Validate every submitted field on the server. Give each mutation a pending state
+that prevents accidental duplicates plus visible success and failure feedback.
+Namespace stored keys by feature, such as `poll:summer-trip:title`, and keep
+stored values compatible with historical site versions that may still read or
+write them.
+
 Stored text and delivered events are shared by all deployed and historical
 versions of this assistant. Keep keys at most 256 UTF-8 bytes, values at most 64
 KiB, event keys at most 128 UTF-8 bytes, and event JSON at most 256 KiB.
@@ -154,6 +198,11 @@ available. The public proxy strips credentials and cookies, so do not design
 the site around cookie sessions, inbound `Authorization`, `Set-Cookie`, or
 private browser-held secrets. Treat every public request and form field as
 untrusted input.
+
+Prefer committed assets imported from `src/` over remote hotlinks. Give images
+meaningful alt text and explicit dimensions or aspect ratios. When a requested
+asset is unavailable, use a deliberate local placeholder and tell the user what
+needs replacement; never silently substitute an unrelated image.
 
 ## Iterate locally
 
@@ -210,6 +259,11 @@ Confirm that:
 - links, redirects, form actions, and assets work beneath both mount paths.
 - loaders render useful fixture data without client-side
   `artifacts.internal` calls.
+- narrow mobile and normal desktop layouts have deliberate hierarchy and no
+  clipped or overlapping content.
+- long labels, empty collections, pending submissions, success, and failure
+  states remain usable.
+- keyboard focus order and visible focus states work for every interaction.
 - client hydration produces no console errors when a browser is available.
 - the diff contains only intentional source, dependency, generated artifact,
   and manifest changes.
@@ -242,4 +296,5 @@ runtime request.
 
 After success, request the printed URL and report the live outcome concisely.
 Use the printed URL rather than constructing one from environment values.
-Reprint the same stable pinned URL later with `pnpm site:url`.
+Reprint the same stable pinned URL later with `pnpm site:url`. Describe what
+changed from the visitor's perspective rather than listing files.
