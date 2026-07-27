@@ -1,0 +1,9 @@
+hero = Stack("xl", [
+  Badge("Group space active", "success"),
+  Heading("Neighborhood Lab", 1),
+  Text("A focused home for the people and work in this conversation.", "muted"),
+  Button("/about", "Learn about this space", "secondary")
+])
+memberCard = Card("People in this group", [Text("Four neighbors are collaborating here today.", "muted"), Button("/about", "Meet the group")])
+workCard = Card("Start something useful", [Text("Ask your assistant to turn a shared idea into a plan, list, or update.", "muted")])
+root = Page("Neighborhood Lab", [Section(null, "plain", hero), Section("A shared place to move work forward", "accent", Grid(2, [memberCard, workCard]))])

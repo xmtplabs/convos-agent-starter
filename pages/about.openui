@@ -1,0 +1,2 @@
+intro = Stack("lg", [Heading("About Neighborhood Lab", 1), Text("A practical space for neighbors to coordinate small projects and keep one another in the loop.", "muted"), Link("/", "Back to the home page")])
+root = Page("About Neighborhood Lab", [Section(null, "plain", intro)])

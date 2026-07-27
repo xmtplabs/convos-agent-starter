@@ -1,5 +1,6 @@
 node_modules/
-.react-router/
-.wrangler/
-.dev.vars
-.preview/
+dist/
+public/
+.dev.vars*
+.env*
+*.tsbuildinfo
