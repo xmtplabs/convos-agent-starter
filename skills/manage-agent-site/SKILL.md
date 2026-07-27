@@ -23,6 +23,10 @@ cannot express the request; when it does, update the source-owned library or
 public tool registry deliberately, then regenerate the prompt and
 complete deployment checks.
 
+When the request requires a new component or public tool, read
+[`EXTENDING.md`](EXTENDING.md) and follow its schema, fixture, SSR, mutation,
+and generated-contract guidance.
+
 Pages use static, case-sensitive routes: `pages/index.openui` is `/`,
 `pages/about.openui` is `/about`, and `pages/docs/index.openui` is `/docs`.
 Do not create dynamic paths, dot segments, encoded separators, or backslashes.

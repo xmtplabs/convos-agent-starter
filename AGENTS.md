@@ -9,6 +9,8 @@ site-format changes to the preserved `07-23-agent-sites` branch.
 `pages/**/*.openui` is the page and layout surface. Before changing a site,
 read `generated/openui-system-prompt.txt` in full and use its catalog. Edit
 `src/` only when that catalog cannot express the requested component or tool.
+For extension patterns and complete examples, read
+[`skills/manage-agent-site/EXTENDING.md`](skills/manage-agent-site/EXTENDING.md).
 
 `generated/openui-system-prompt.txt` and `convos.site.json` are generated,
 committed source contracts. Regenerate them only through `pnpm run deploy`.
