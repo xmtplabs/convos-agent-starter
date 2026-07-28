@@ -17,7 +17,7 @@
       "server": "src/server.tsx",
       "client": "src/client.tsx",
       "compatibilityDate": "2026-07-24",
-      "compatibilityFlags": []
+      "compatibilityFlags": ["nodejs_compat"]
     }
   },
   "scripts": {
