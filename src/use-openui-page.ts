@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PAGE_BUNDLE_DIGEST_HEADER } from "./runtime-contract.js";
 
 export type OpenUiPageStatus = "loading" | "ready" | "error";
 export type OpenUiPage = {
@@ -135,7 +136,7 @@ export class OpenUiPageController {
       );
       const decision = classifyPageResponse(
         response.status,
-        response.headers.get("x-convos-bundle-digest"),
+        response.headers.get(PAGE_BUNDLE_DIGEST_HEADER),
         this.options.expectedBundleDigest,
         this.hasGoodSource,
       );

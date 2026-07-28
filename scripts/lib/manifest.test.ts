@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -58,7 +58,6 @@ async function withFixture<T>(
             site: {
               server: "src/server.ts",
               client: "src/client.ts",
-              styles: ["src/styles.css"],
               compatibilityDate: "2026-07-24",
               compatibilityFlags: [],
             },
@@ -168,15 +167,93 @@ test("accepts the platform workspace source-file boundary and rejects one byte a
   });
 });
 
-test("uses the Worker bundle identity contract, including the canonical catalog digest", async () => {
+test("rejects repository paths containing URL delimiters", async () => {
+  for (const path of ["src/hash#name.ts", "src/encoded%41.ts"]) {
+    await assert.rejects(
+      withFixture(`  root@1.0.0: {}\n`, async (root) => {
+        await writeFile(join(root, path), "export {}");
+        return createManifest(root);
+      }),
+      /unsafe path/,
+    );
+  }
+});
+
+test("rejects page and asset URLs outside the platform path grammar", async () => {
+  for (const filename of [
+    "raw space",
+    'double"quote',
+    "less<than",
+    "greater>than",
+    "back`tick",
+  ]) {
+    await assert.rejects(
+      withFixture(`  root@1.0.0: {}\n`, async (root) => {
+        await writeFile(
+          join(root, "pages", `${filename}.openui`),
+          'Page("Invalid", [])',
+        );
+        return createManifest(root);
+      }),
+      /invalid page route/,
+    );
+  }
+
+  await assert.rejects(
+    withFixture(`  root@1.0.0: {}\n`, async (root) => {
+      await mkdir(join(root, "assets"));
+      await writeFile(join(root, "assets", "raw space.txt"), "invalid");
+      return createManifest(root);
+    }),
+    /invalid asset URL/,
+  );
+});
+
+test("rejects page routes that shadow runtime assets", async () => {
+  for (const route of ["styles.css", "client.js"]) {
+    await assert.rejects(
+      withFixture(`  root@1.0.0: {}\n`, async (root) => {
+        await writeFile(
+          join(root, "pages", `${route}.openui`),
+          'Page("Shadowed", [])',
+        );
+        return createManifest(root);
+      }),
+      /page route conflicts with a runtime asset/,
+    );
+  }
+});
+
+test("rejects compiled client URLs that collide with static assets", async () => {
+  await assert.rejects(
+    withFixture(`  root@1.0.0: {}\n`, async (root) => {
+      const packageJson = JSON.parse(
+        await readFile(join(root, "package.json"), "utf8"),
+      ) as {
+        convos: { site: { client: string } };
+      };
+      packageJson.convos.site.client = "src/assets/client.ts";
+      await mkdir(join(root, "src", "assets"));
+      await mkdir(join(root, "assets"));
+      await Promise.all([
+        writeFile(join(root, "package.json"), JSON.stringify(packageJson)),
+        writeFile(join(root, "src", "assets", "client.ts"), "export {}"),
+        writeFile(join(root, "assets", "client.js"), "static"),
+      ]);
+      return createManifest(root);
+    }),
+    /runtime client conflicts with a static asset URL/,
+  );
+});
+
+test("separates executable bundle identity from static page and asset content", async () => {
   await withFixture(`  root@1.0.0: {}\n`, async (root) => {
     const first = await createManifest(root);
-    const expected = createHash("sha256")
+    const expectedBundle = createHash("sha256")
       .update(
         canonicalJson({
           runtime: first.runtime,
           dependencyDigest: first.dependencies.dependencyDigest,
-          catalogDigest: first.catalog.catalogDigest,
           files: first.code.files
             .slice()
             .sort((left, right) => compareCodePoints(left.path, right.path))
@@ -188,16 +265,80 @@ test("uses the Worker bundle identity contract, including the canonical catalog 
         }),
       )
       .digest("hex");
-    assert.equal(first.code.bundleDigest, expected);
+    const expectedContent = createHash("sha256")
+      .update(
+        canonicalJson({
+          assets: first.assets
+            .slice()
+            .sort((left, right) =>
+              compareCodePoints(left.urlPath, right.urlPath),
+            )
+            .map(({ urlPath, contentType, path, size, sha256 }) => ({
+              urlPath,
+              contentType,
+              path,
+              size,
+              sha256,
+            })),
+        }),
+      )
+      .digest("hex");
+    assert.equal(first.code.bundleDigest, expectedBundle);
+    assert.equal(first.contentDigest, expectedContent);
+    assert.deepEqual(Object.keys(first).sort(), [
+      "assets",
+      "code",
+      "contentDigest",
+      "dependencies",
+      "deploymentDigest",
+      "gitObjectFormat",
+      "runtime",
+      "schemaVersion",
+    ]);
+    assert.deepEqual(
+      first.assets.map(({ path, urlPath, contentType }) => ({
+        path,
+        urlPath,
+        contentType,
+      })),
+      [
+        {
+          path: "pages/index.openui",
+          urlPath: "/__convos/pages/index.openui",
+          contentType: "text/plain; charset=utf-8",
+        },
+        {
+          path: "src/styles.css",
+          urlPath: "/styles.css",
+          contentType: "text/css",
+        },
+      ],
+    );
 
     await writeFile(join(root, "generated/openui-catalog.json"), " { }\n");
-    const whitespaceOnly = await createManifest(root);
-    assert.equal(whitespaceOnly.catalog.catalogDigest, first.catalog.catalogDigest);
-    assert.equal(whitespaceOnly.code.bundleDigest, first.code.bundleDigest);
+    await writeFile(join(root, "generated/openui-system-prompt.txt"), "changed");
+    const generatedOnly = await createManifest(root);
+    assert.deepEqual(generatedOnly, first);
 
-    await writeFile(join(root, "generated/openui-catalog.json"), '{ "tools": [] }\n');
-    const second = await createManifest(root);
-    assert.notEqual(second.catalog.catalogDigest, first.catalog.catalogDigest);
-    assert.notEqual(second.code.bundleDigest, first.code.bundleDigest);
+    await writeFile(join(root, "pages/index.openui"), 'Page("Changed", [])');
+    const pageChanged = await createManifest(root);
+    assert.equal(pageChanged.code.bundleDigest, first.code.bundleDigest);
+    assert.notEqual(pageChanged.contentDigest, first.contentDigest);
+
+    await writeFile(join(root, "src/styles.css"), "body {}");
+    const stylesheetChanged = await createManifest(root);
+    assert.equal(
+      stylesheetChanged.code.bundleDigest,
+      pageChanged.code.bundleDigest,
+    );
+    assert.notEqual(
+      stylesheetChanged.contentDigest,
+      pageChanged.contentDigest,
+    );
+
+    await writeFile(join(root, "src/server.ts"), "export default { fetch() {} }");
+    const codeChanged = await createManifest(root);
+    assert.notEqual(codeChanged.code.bundleDigest, first.code.bundleDigest);
+    assert.equal(codeChanged.contentDigest, stylesheetChanged.contentDigest);
   });
 });

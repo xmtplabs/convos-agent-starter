@@ -6,7 +6,6 @@ import { SiteError } from "./error.js";
 export type SiteConfig = {
   server: string;
   client: string;
-  styles: string[];
   compatibilityDate: string;
   compatibilityFlags: string[];
 };
@@ -38,7 +37,7 @@ export function isSafeRelativePath(value: string): boolean {
     SAFE_RELATIVE_PATH.test(value) &&
     ASCII_PATH.test(value) &&
     !/^[A-Za-z]:\//.test(value) &&
-    !hasEncodedPathSemantics(value) &&
+    !/[#%]/.test(value) &&
     value === value.normalize("NFC") &&
     value
       .split("/")
@@ -78,7 +77,6 @@ export async function loadSiteConfig(root: string): Promise<SiteConfig> {
         ![
           "server",
           "client",
-          "styles",
           "compatibilityDate",
           "compatibilityFlags",
         ].includes(key),
@@ -104,21 +102,6 @@ export async function loadSiteConfig(root: string): Promise<SiteConfig> {
       "invalid runtime entrypoints",
     );
   }
-  if (
-    !Array.isArray(config.styles) ||
-    !config.styles.every(
-      (style): style is string =>
-        typeof style === "string" && isSourcePath(style),
-    ) ||
-    !isStrictlySorted(config.styles) ||
-    !isUniqueCanonical(config.styles)
-  ) {
-    throw new SiteError(
-      "invalid_configuration",
-      "configuration",
-      "styles must be unique sorted source paths",
-    );
-  }
   if (!isValidCompatibilityDate(config.compatibilityDate)) {
     throw new SiteError(
       "invalid_configuration",
@@ -141,11 +124,7 @@ export async function loadSiteConfig(root: string): Promise<SiteConfig> {
     );
   }
   const complete = config as SiteConfig;
-  for (const path of [
-    complete.server,
-    complete.client,
-    ...complete.styles,
-  ]) {
+  for (const path of [complete.server, complete.client]) {
     const fullPath = resolve(root, path);
     let metadata;
     try {
@@ -179,10 +158,6 @@ function isStrictlySorted(values: readonly string[]): boolean {
   );
 }
 
-function isUniqueCanonical(values: readonly string[]): boolean {
-  return new Set(values.map(caseFoldedPath)).size === values.length;
-}
-
 function isValidCompatibilityDate(value: unknown): value is string {
   if (
     typeof value !== "string" ||
@@ -199,27 +174,4 @@ function isValidCompatibilityDate(value: unknown): value is string {
     date.getUTCMonth() === month - 1 &&
     date.getUTCDate() === day
   );
-}
-
-function hasEncodedPathSemantics(value: string): boolean {
-  let decoded = value;
-  for (let depth = 0; depth < 4; depth += 1) {
-    if (!decoded.includes("%")) return false;
-    let next: string;
-    try {
-      next = decodeURIComponent(decoded);
-    } catch {
-      return true;
-    }
-    if (next === decoded) return false;
-    if (
-      next.includes("\\") ||
-      next.split("/").some((part) => part === "." || part === "..") ||
-      next.split("/").length !== decoded.split("/").length
-    ) {
-      return true;
-    }
-    decoded = next;
-  }
-  return decoded.includes("%");
 }

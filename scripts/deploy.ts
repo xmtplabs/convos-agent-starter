@@ -116,7 +116,9 @@ async function validate() {
     );
   }
   const manifest = await createManifest(root);
-  for (const page of manifest.pages) {
+  for (const page of manifest.assets.filter((entry) =>
+    entry.path.startsWith("pages/"),
+  )) {
     await renderFixturePage(root, page.path, "defaults");
   }
   const homepage = await renderFixturePage(root, "/", "live");
@@ -261,6 +263,26 @@ function requiredPoolUrl(value: string): URL {
   return parsed;
 }
 
+function confirmsDeployment(result: unknown, commitSha: string): boolean {
+  if (!result || typeof result !== "object") return false;
+  const value = result as {
+    ok?: unknown;
+    commit_sha?: unknown;
+    validation?: {
+      checks?: unknown;
+      duration_ms?: unknown;
+    };
+  };
+  return (
+    value.ok === true &&
+    value.commit_sha === commitSha &&
+    Number.isInteger(value.validation?.checks) &&
+    Number(value.validation?.checks) >= 1 &&
+    Number.isInteger(value.validation?.duration_ms) &&
+    Number(value.validation?.duration_ms) >= 0
+  );
+}
+
 async function commitPushAndActivate() {
   const poolBaseUrl = requiredPoolUrl(required("POOL_URL"));
   const publicBaseUrl = requiredHttpsUrl(
@@ -354,13 +376,7 @@ async function commitPushAndActivate() {
   }
   if (
     !response.ok ||
-    !result ||
-    typeof result !== "object" ||
-    (result as { ok?: unknown }).ok !== true ||
-    (result as { commit_sha?: unknown }).commit_sha !== commitSha ||
-    (result as {
-      validation?: { homepage_status?: unknown };
-    }).validation?.homepage_status !== 200
+    !confirmsDeployment(result, commitSha)
   ) {
     throw new SiteError(
       "deployment_failed",

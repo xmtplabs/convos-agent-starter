@@ -5,25 +5,66 @@ import test from "node:test";
 import worker, {
   OpenUiRenderError,
   RENDER_LIMITS,
-  SITE_BASE_PATH_HEADER,
-  SITE_STYLESHEET_HEADER,
   SITE_QUERY_COUNT_HEADER,
   SITE_QUERY_DURATION_HEADER,
-  SITE_RENDER_TIMEOUT_HEADER,
   renderOpenUiDocument,
+  type SiteEnvironment,
 } from "./server.js";
 import { createOpenUiSystemPrompt } from "./prompt.js";
 import { createOpenUiSystemPrompt as createAuthoredPrompt } from "../scripts/lib/prompt.js";
 import { fixtureGroup } from "./fixtures.js";
+import {
+  PAGE_BUNDLE_DIGEST_HEADER,
+  SITE_BASE_PATH_HEADER,
+  SITE_BUNDLE_DIGEST_HEADER,
+} from "./runtime-contract.js";
 
 const page = (children: string) =>
   `root = Page("Test page", [${children}])`;
 const queryDefaults = JSON.stringify(fixtureGroup);
-const validationStylesheet = "/__convos/assets/9f0a6c4e3b218d5a.css";
+const bundleDigest = "a".repeat(64);
 const committedPromptUrl = new URL(
   "../generated/openui-system-prompt.txt",
   import.meta.url,
 );
+const workerHeaders = {
+  [SITE_BASE_PATH_HEADER]: "/sites/example",
+  [SITE_BUNDLE_DIGEST_HEADER]: bundleDigest,
+};
+
+function testEnvironment(): SiteEnvironment {
+  const values = new Map([
+    ["/__convos/pages/index.openui", page('Heading("Home", 1)')],
+    ["/__convos/pages/about.openui", page('Heading("About", 1)')],
+    ["/client.js", "console.log('client')"],
+    ["/styles.css", "body { color: black; }"],
+  ]);
+  return {
+    ASSETS: {
+      async fetch(request) {
+        const path = new URL(request.url).pathname;
+        const value = values.get(path);
+        if (value === undefined) return new Response(null, { status: 404 });
+        const etag = `"${createHash("sha256").update(value).digest("hex")}"`;
+        const headers = {
+          "content-type": path.endsWith(".css")
+            ? "text/css"
+            : path.endsWith(".js")
+              ? "text/javascript"
+              : "text/plain; charset=utf-8",
+          etag,
+        };
+        if (request.headers.get("if-none-match") === etag) {
+          return new Response(null, { status: 304, headers });
+        }
+        return new Response(request.method === "HEAD" ? null : value, {
+          headers,
+        });
+      },
+    },
+  };
+}
+
 const render = (source: string, queryMode: "live" | "defaults" = "defaults") =>
   renderOpenUiDocument({
     source,
@@ -312,17 +353,58 @@ test("static output is mounted, styled, accessible, and script-free", async () =
   assert.doesNotMatch(result.html, /queryData|resolvedSource/);
 });
 
-test("default Worker exposes stable render and problem responses", async () => {
+test("default Worker serves pages, assets, rendering, and tools from its mount", async () => {
+  const environment = testEnvironment();
+  const shell = await worker.fetch(
+    new Request("https://site.test/sites/example/", {
+      headers: workerHeaders,
+    }),
+    environment,
+  );
+  assert.equal(shell.status, 200);
+  assert.match(await shell.text(), /<base href="\/sites\/example\/">/);
+  assert.match(
+    await (
+      await worker.fetch(
+        new Request("https://site.test/sites/example/", {
+          headers: workerHeaders,
+        }),
+        environment,
+      )
+    ).text(),
+    /"route":"\/","bundleDigest":"a{64}","historical":false/,
+  );
+
+  const source = await worker.fetch(
+    new Request(
+      "https://site.test/sites/example/__convos/page?route=%2Fabout",
+      { headers: workerHeaders },
+    ),
+    environment,
+  );
+  assert.equal(source.status, 200);
+  assert.equal(source.headers.get(PAGE_BUNDLE_DIGEST_HEADER), bundleDigest);
+  assert.match(await source.text(), /Heading\("About", 1\)/);
+
+  const stylesheet = await worker.fetch(
+    new Request("https://site.test/sites/example/styles.css", {
+      headers: workerHeaders,
+    }),
+    environment,
+  );
+  assert.equal(stylesheet.status, 200);
+  assert.equal(await stylesheet.text(), "body { color: black; }");
+
   const response = await worker.fetch(
     new Request("https://site.test/sites/example/__convos/render?query_mode=defaults", {
       method: "POST",
       headers: {
         "content-type": "text/plain",
-        [SITE_BASE_PATH_HEADER]: "/sites/example",
-        [SITE_STYLESHEET_HEADER]: "/__convos/assets/site.css",
+        ...workerHeaders,
       },
       body: page('Heading("Test", 1)'),
     }),
+    environment,
   );
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html/);
@@ -334,10 +416,11 @@ test("default Worker exposes stable render and problem responses", async () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        [SITE_BASE_PATH_HEADER]: "/sites/example",
+        ...workerHeaders,
       },
       body: JSON.stringify({ name: "private_tool", arguments: {} }),
     }),
+    environment,
   );
   assert.equal(problem.status, 404);
   assert.match(
@@ -349,7 +432,35 @@ test("default Worker exposes stable render and problem responses", async () => {
   assert.equal(Object.hasOwn(body, "stack"), false);
 });
 
+test("default Worker preserves historical mounts and immutable page shells", async () => {
+  const historicalMount = `/site-versions/example/${"b".repeat(40)}`;
+  const response = await worker.fetch(
+    new Request(`https://site.test${historicalMount}/about`, {
+      headers: {
+        [SITE_BASE_PATH_HEADER]: historicalMount,
+        [SITE_BUNDLE_DIGEST_HEADER]: bundleDigest,
+      },
+    }),
+    testEnvironment(),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(
+    response.headers.get("cache-control"),
+    "public, max-age=31536000, immutable",
+  );
+  const body = await response.text();
+  assert.match(
+    body,
+    new RegExp(`<base href="${historicalMount}/">`),
+  );
+  assert.match(
+    body,
+    /"route":"\/about","bundleDigest":"a{64}","historical":true/,
+  );
+});
+
 test("Worker rejects malformed UTF-8 request bodies", async () => {
+  const environment = testEnvironment();
   for (const [path, contentType] of [
     ["/__convos/render?query_mode=defaults", "text/plain"],
     ["/__convos/tools", "application/json"],
@@ -359,11 +470,11 @@ test("Worker rejects malformed UTF-8 request bodies", async () => {
         method: "POST",
         headers: {
           "content-type": contentType,
-          [SITE_BASE_PATH_HEADER]: "/sites/example",
-          [SITE_STYLESHEET_HEADER]: validationStylesheet,
+          ...workerHeaders,
         },
         body: new Uint8Array([0xc3, 0x28]),
       }),
+      environment,
     );
     assert.equal(response.status, 400);
     const body = (await response.json()) as Record<string, unknown>;
@@ -371,44 +482,27 @@ test("Worker rejects malformed UTF-8 request bodies", async () => {
   }
 });
 
-test("Worker honors the loader-controlled remaining render deadline", async () => {
-  const response = await worker.fetch(
-    new Request(
-      "https://site.test/sites/example/__convos/render?query_mode=defaults",
-      {
-        method: "POST",
-        headers: {
-          "content-type": "text/plain",
-          [SITE_BASE_PATH_HEADER]: "/sites/example",
-          [SITE_STYLESHEET_HEADER]: validationStylesheet,
-          [SITE_RENDER_TIMEOUT_HEADER]: "0",
-        },
-        body: page('Heading("Test", 1)'),
-      },
-    ),
-  );
-  assert.equal(response.status, 400);
-});
-
-test("default Worker matches exact mount-relative reserved routes", async () => {
+test("default Worker does not dispatch near-match paths to reserved handlers", async () => {
   const commonHeaders = {
     "content-type": "text/plain",
-    [SITE_BASE_PATH_HEADER]: "/sites/example",
-    [SITE_STYLESHEET_HEADER]: "/__convos/assets/site.css",
+    ...workerHeaders,
   };
-  for (const path of [
-    "/sites/example/nested/__convos/render",
-    "/sites/example/not-__convos/render",
-    "/sites/other/__convos/render",
-  ]) {
+  const environment = testEnvironment();
+  for (const [path, status] of [
+    ["/sites/example/nested/__convos/render", 405],
+    ["/sites/example/not-__convos/render", 405],
+    ["/sites/other/__convos/render", 404],
+  ] as const) {
     const response = await worker.fetch(
       new Request(`https://site.test${path}?query_mode=defaults`, {
         method: "POST",
         headers: commonHeaders,
         body: page('Heading("Test", 1)'),
       }),
+      environment,
     );
-    assert.equal(response.status, 404);
+    assert.equal(response.status, status);
+    assert.equal(response.headers.get(SITE_QUERY_COUNT_HEADER), null);
   }
 });
 

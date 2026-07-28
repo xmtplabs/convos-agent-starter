@@ -9,16 +9,18 @@ The starter deliberately separates page data from executable code:
 | --- | --- | --- |
 | Copy, layout, or page composition | `pages/**/*.openui` | No |
 | Static image or other public asset | `assets/**` | No |
-| Component behavior or markup | `src/library.tsx`, usually `src/styles.css` | Yes |
+| Component styles | `src/styles.css` | No |
+| Component behavior or markup | `src/library.tsx` | Yes |
 | Public query or mutation | `src/tools.ts`, and usually `src/fixtures.ts` | Yes |
 | Runtime behavior | `src/client.tsx`, `src/server.tsx` | Yes |
 | Runtime dependency or entrypoint | `package.json`, `pnpm-lock.yaml` | Yes |
 
 The manifest records separate aggregate identities for dependencies, bundled
-code, and page/asset content. A page-only deployment can therefore reuse the
-existing Worker bundle. The browser fetches the current OpenUI document from
-the server and, for a normal pinned site URL, checks for a newer document every
-five seconds.
+code, and static content. Pages and `src/styles.css` are exposed to the Worker
+through its `ASSETS` binding, so page, stylesheet, and asset-only deployments
+reuse the existing Worker bundle. The browser fetches the current OpenUI
+document from the server and, for a normal pinned site URL, checks for a newer
+document every five seconds.
 
 ## Start with the generated contract
 
@@ -378,7 +380,7 @@ In the configured Hermes environment it performs the complete transaction:
 
 1. regenerates `generated/openui-catalog.json`;
 2. regenerates `generated/openui-system-prompt.txt`;
-3. regenerates the source-only `convos.site.json`;
+3. regenerates the code/content `convos.site.json`;
 4. type-checks the starter;
 5. parses and fixture-renders every page;
 6. live-renders the homepage with query fixtures;
@@ -438,9 +440,10 @@ shape.
 
 ### The page changed but the browser still shows the previous content
 
-A normal pinned page checks every five seconds and reloads when its content
-identity changes. Historical commit URLs are immutable and intentionally fetch
-only once.
+A normal pinned page checks every five seconds and displays updated page
+content without rebuilding the Worker. It reloads the shell only when the
+runtime bundle changes. Historical commit URLs are immutable and intentionally
+fetch only once.
 
 ## File map
 
@@ -451,7 +454,7 @@ only once.
 | `src/tools.ts` | Public query/mutation registry and schemas |
 | `src/fixtures.ts` | Deterministic local query results |
 | `src/client.tsx` | Browser renderer and public tool provider |
-| `src/server.tsx` | Strict parsing, query resolution, and static rendering |
+| `src/server.tsx` | Site routing, `ASSETS` access, tools, and static rendering |
 | `src/catalog.ts` | Inert catalog derived from the runtime definitions |
 | `src/prompt.ts` | Deterministic system-prompt generator |
 | `src/styles.css` | Shared component styles |

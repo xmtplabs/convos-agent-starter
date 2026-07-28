@@ -67,7 +67,7 @@ only publication command is:
 pnpm run deploy
 ```
 
-It regenerates and verifies the committed prompt and v2 source manifest,
+It regenerates and verifies the committed prompt and v2 code/content manifest,
 type-checks runtime code, parses every page, fixture-renders the homepage,
 commits the governed source paths, pushes through the instance-bound internal
 Git proxy with a hermetic Git environment, and asks the platform to activate

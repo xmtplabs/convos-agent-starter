@@ -20,6 +20,11 @@ import {
   toolRegistry,
   type PublicTool,
 } from "./tools.js";
+import {
+  PAGE_BUNDLE_DIGEST_HEADER,
+  SITE_BASE_PATH_HEADER,
+  SITE_BUNDLE_DIGEST_HEADER,
+} from "./runtime-contract.js";
 
 export const RENDER_LIMITS = Object.freeze({
   sourceBytes: 256 * 1024,
@@ -1061,16 +1066,10 @@ async function handleStaticRenderRequest(request: Request): Promise<Response> {
     throw requestError("query_mode must be live or defaults.");
   }
   const mountPath = request.headers.get(SITE_BASE_PATH_HEADER);
-  const stylesheetPath = request.headers.get(SITE_STYLESHEET_HEADER);
-  if (!mountPath || !stylesheetPath) {
-    throw requestError(
-      "Static rendering requires explicit mount and stylesheet metadata.",
-    );
+  if (!mountPath) {
+    throw requestError("Static rendering requires explicit mount metadata.");
   }
-  const deadlineAt = Date.now() + renderDeadlineMs(request);
   const source = await boundedText(request, RENDER_LIMITS.sourceBytes);
-  const remaining = deadlineAt - Date.now();
-  if (remaining <= 0) throw deadlineError();
   const telemetry: StaticRenderTelemetry = {
     queryCount: 0,
     queryDurationMs: 0,
@@ -1080,9 +1079,8 @@ async function handleStaticRenderRequest(request: Request): Promise<Response> {
       source,
       queryMode: mode,
       mountPath,
-      stylesheetPath,
+      stylesheetPath: "styles.css",
       signal: request.signal,
-      deadlineMs: remaining,
       telemetry,
     });
     return new Response(result.html, {
@@ -1110,28 +1108,9 @@ async function handleStaticRenderRequest(request: Request): Promise<Response> {
   }
 }
 
-export const SITE_BASE_PATH_HEADER = "x-convos-site-base-path";
-export const SITE_STYLESHEET_HEADER = "x-convos-site-stylesheet";
-export const SITE_RENDER_TIMEOUT_HEADER = "x-convos-render-timeout-ms";
 export const SITE_QUERY_COUNT_HEADER = "x-convos-openui-query-count";
 export const SITE_QUERY_DURATION_HEADER =
   "x-convos-openui-query-duration-ms";
-
-function renderDeadlineMs(request: Request): number {
-  const value = request.headers.get(SITE_RENDER_TIMEOUT_HEADER);
-  if (value === null) return RENDER_LIMITS.deadlineMs;
-  if (!/^[1-9]\d{0,4}$/.test(value)) {
-    throw requestError("The trusted render deadline is invalid.");
-  }
-  const milliseconds = Number(value);
-  if (
-    !Number.isSafeInteger(milliseconds) ||
-    milliseconds > RENDER_LIMITS.deadlineMs
-  ) {
-    throw requestError("The trusted render deadline is invalid.");
-  }
-  return milliseconds;
-}
 
 function logicalRuntimePath(request: Request): string {
   const mountPath = request.headers.get(SITE_BASE_PATH_HEADER);
@@ -1139,11 +1118,184 @@ function logicalRuntimePath(request: Request): string {
   validateMountPath(mountPath);
   const pathname = new URL(request.url).pathname;
   const prefix = mountPath === "/" ? "" : mountPath;
-  if (!pathname.startsWith(`${prefix}/`)) return "";
+  if (pathname === prefix) return "/";
+  if (!pathname.startsWith(`${prefix}/`)) {
+    throw requestError("The request is outside the site mount.", 404);
+  }
   return pathname.slice(prefix.length);
 }
 
-async function fetch(request: Request): Promise<Response> {
+type AssetFetcher = {
+  fetch(request: Request): Promise<Response>;
+};
+
+export type SiteEnvironment = {
+  ASSETS: AssetFetcher;
+};
+
+type ShellMetadata = {
+  route: string;
+  bundleDigest: string;
+  historical: boolean;
+};
+
+function scriptJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
+}
+
+function pageAssetCandidates(route: string): string[] {
+  if (
+    !route.startsWith("/") ||
+    route.includes("\\") ||
+    route.includes("?") ||
+    route.includes("#") ||
+    route.includes("%") ||
+    route.includes("//") ||
+    (route !== "/" && route.endsWith("/")) ||
+    /[^\x20-\x7e]/.test(route) ||
+    /[\[\]:$]/.test(route) ||
+    route.split("/").some((part) => part === "." || part === "..") ||
+    route === "/__convos" ||
+    route.startsWith("/__convos/")
+  ) {
+    throw requestError("The page route is invalid.");
+  }
+  if (route === "/") return ["/__convos/pages/index.openui"];
+  const stem = route.slice(1);
+  return [
+    `/__convos/pages/${stem}.openui`,
+    `/__convos/pages/${stem}/index.openui`,
+  ];
+}
+
+function assetRequest(
+  request: Request,
+  path: string,
+  method = request.method,
+  conditional = true,
+): Request {
+  const url = new URL(request.url);
+  url.pathname = path;
+  url.search = "";
+  const headers = new Headers(request.headers);
+  if (!conditional) headers.delete("if-none-match");
+  return new Request(url, {
+    method,
+    headers,
+    signal: request.signal,
+  });
+}
+
+async function findPageAsset(
+  request: Request,
+  assets: AssetFetcher,
+  route: string,
+  method: "GET" | "HEAD",
+  conditional = true,
+): Promise<Response> {
+  for (const path of pageAssetCandidates(route)) {
+    const response = await assets.fetch(
+      assetRequest(request, path, method, conditional),
+    );
+    if (response.status !== 404) return response;
+    await response.body?.cancel();
+  }
+  return new Response(null, { status: 404 });
+}
+
+function shellResponse(
+  request: Request,
+  metadata: ShellMetadata,
+): Response {
+  const mountPath = request.headers.get(SITE_BASE_PATH_HEADER)!;
+  const base = mountPath === "/" ? "/" : `${mountPath}/`;
+  const body =
+    "<!doctype html>" +
+    '<html lang="en"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    `<base href="${escapeHtml(base)}">` +
+    '<link rel="stylesheet" href="styles.css">' +
+    "<title>Convos site</title>" +
+    '</head><body><div id="root"></div>' +
+    `<script id="convos-site" type="application/json">${scriptJson(metadata)}</script>` +
+    '<script type="module" src="client.js"></script></body></html>';
+  return new Response(request.method === "HEAD" ? null : body, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": metadata.historical
+        ? "public, max-age=31536000, immutable"
+        : "private, no-cache",
+    },
+  });
+}
+
+function bundleIdentity(request: Request): string {
+  const digest = request.headers.get(SITE_BUNDLE_DIGEST_HEADER);
+  if (!digest || !/^[a-f0-9]{64}$/.test(digest)) {
+    throw requestError("Missing trusted site bundle metadata.");
+  }
+  return digest;
+}
+
+async function handlePageRequest(
+  request: Request,
+  assets: AssetFetcher,
+): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    throw requestError("Method not allowed.", 405);
+  }
+  const route = new URL(request.url).searchParams.get("route");
+  if (route === null) throw requestError("The page route is required.");
+  const response = await findPageAsset(
+    request,
+    assets,
+    route,
+    request.method,
+  );
+  const headers = new Headers(response.headers);
+  headers.set(PAGE_BUNDLE_DIGEST_HEADER, bundleIdentity(request));
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function handleDocumentOrAssetRequest(
+  request: Request,
+  assets: AssetFetcher,
+  pathname: string,
+): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    throw requestError("Method not allowed.", 405);
+  }
+
+  const asset = await assets.fetch(assetRequest(request, pathname));
+  if (asset.status !== 404) return asset;
+  await asset.body?.cancel();
+
+  const page = await findPageAsset(request, assets, pathname, "HEAD", false);
+  if (page.status === 404) return page;
+  if (!page.ok) return page;
+  await page.body?.cancel();
+
+  const mountPath = request.headers.get(SITE_BASE_PATH_HEADER)!;
+  return shellResponse(request, {
+    route: pathname,
+    bundleDigest: bundleIdentity(request),
+    historical: mountPath.startsWith("/site-versions/"),
+  });
+}
+
+async function fetch(
+  request: Request,
+  environment: SiteEnvironment,
+): Promise<Response> {
   try {
     const pathname = logicalRuntimePath(request);
     if (pathname === "/__convos/tools") {
@@ -1152,7 +1304,19 @@ async function fetch(request: Request): Promise<Response> {
     if (pathname === "/__convos/render") {
       return await handleStaticRenderRequest(request);
     }
-    return problemResponse(requestError("Reserved runtime route not found.", 404));
+    if (pathname === "/__convos/page") {
+      return await handlePageRequest(request, environment.ASSETS);
+    }
+    if (pathname === "/__convos" || pathname.startsWith("/__convos/")) {
+      return problemResponse(
+        requestError("Reserved runtime route not found.", 404),
+      );
+    }
+    return await handleDocumentOrAssetRequest(
+      request,
+      environment.ASSETS,
+      pathname,
+    );
   } catch (error) {
     return problemResponse(error);
   }

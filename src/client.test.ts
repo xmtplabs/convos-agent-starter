@@ -12,6 +12,7 @@ import {
   OpenUiPageController,
   type PagePollerDependencies,
 } from "./use-openui-page.js";
+import { PAGE_BUNDLE_DIGEST_HEADER } from "./runtime-contract.js";
 
 const pageResponse = (
   body: string,
@@ -22,7 +23,7 @@ const pageResponse = (
     status,
     headers: {
       etag: '"page"',
-      "x-convos-bundle-digest": bundleDigest,
+      [PAGE_BUNDLE_DIGEST_HEADER]: bundleDigest,
       "x-convos-content-digest": "content",
       "x-convos-page-digest": "page",
     },

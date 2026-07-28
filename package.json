@@ -16,7 +16,6 @@
     "site": {
       "server": "src/server.tsx",
       "client": "src/client.tsx",
-      "styles": ["src/styles.css"],
       "compatibilityDate": "2026-07-24",
       "compatibilityFlags": []
     }

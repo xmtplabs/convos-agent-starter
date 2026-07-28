@@ -15,19 +15,20 @@ const EXACT_VERSION =
 const PACKAGE_NAME =
   /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const RESERVED_URL_PREFIX = "/__convos";
+const URL_PATH_SEGMENT = /^[A-Za-z0-9._~!$&'()+,;=:@-]+$/;
 export const WORKSPACE_VALUE_MAX_BYTES = 1_900_000;
 const LIMITS = {
   entries: 1_000,
+  pathBytes: 1_024,
   sourceFileBytes: WORKSPACE_VALUE_MAX_BYTES,
   totalSourceBytes: 32 * 1024 * 1024,
   pageBytes: 256 * 1024,
   totalPageBytes: 8 * 1024 * 1024,
   assetBytes: 25 * 1024 * 1024,
   totalAssetBytes: 512 * 1024 * 1024,
-  promptBytes: 1 * 1024 * 1024,
-  catalogBytes: 1 * 1024 * 1024,
   lockedPackages: 1_000,
 } as const;
+const utf8 = new TextEncoder();
 
 const sha256 = (value: Uint8Array | string) =>
   createHash("sha256").update(value).digest("hex");
@@ -39,7 +40,7 @@ export type SourceEntry = {
   gitBlobSha: string;
   sha256: string;
 };
-export type PageEntry = SourceEntry & { route: string };
+type PageEntry = SourceEntry & { route: string; urlPath: string };
 export type AssetEntry = SourceEntry & {
   urlPath: string;
   contentType: string;
@@ -60,15 +61,6 @@ export type SiteManifestV2 = {
     packages: LockedPackage[];
   };
   code: { bundleDigest: string; files: SourceEntry[] };
-  prompt: SourceEntry & {
-    path: "generated/openui-system-prompt.txt";
-    promptDigest: string;
-  };
-  catalog: SourceEntry & {
-    path: "generated/openui-catalog.json";
-    catalogDigest: string;
-  };
-  pages: PageEntry[];
   assets: AssetEntry[];
   contentDigest: string;
   deploymentDigest: string;
@@ -177,6 +169,10 @@ function routeForPage(path: string): string {
   return route;
 }
 
+function urlPathForPage(path: string): string {
+  return `/__convos/${path}`;
+}
+
 function isRoute(value: string): boolean {
   return (
     value === "/" ||
@@ -188,11 +184,24 @@ function isRoute(value: string): boolean {
 
 function isUrlPath(value: string): boolean {
   return (
-    value.startsWith("/") &&
-    value !== "/" &&
-    isSafeRelativePath(value.slice(1)) &&
-    !/[?#%]/.test(value)
+    value === "/" ||
+    (value.startsWith("/") &&
+      utf8.encode(value).byteLength <= LIMITS.pathBytes &&
+      value === value.normalize("NFC") &&
+      value
+        .slice(1)
+        .split("/")
+        .every(
+          (part) =>
+            part !== "." && part !== ".." && URL_PATH_SEGMENT.test(part),
+        ))
   );
+}
+
+function clientBundleUrlPath(entrypoint: string): string {
+  return `/${entrypoint
+    .replace(/^src\//, "")
+    .replace(/\.(tsx?|jsx?)$/, ".js")}`;
 }
 
 const contentTypes: Record<string, string> = {
@@ -513,16 +522,14 @@ function fileDigestInput(entry: SourceEntry) {
 function validateInventory(
   runtime: SiteConfig,
   source: SourceEntry[],
-  prompt: SourceEntry,
-  catalog: SourceEntry,
   pages: PageEntry[],
   assets: AssetEntry[],
 ) {
   if (
-    source.length + pages.length + assets.length + 2 > LIMITS.entries ||
+    source.length + pages.length + assets.length > LIMITS.entries ||
     sum(source) > LIMITS.totalSourceBytes ||
     sum(pages) > LIMITS.totalPageBytes ||
-    sum(assets) > LIMITS.totalAssetBytes
+    sum([...pages, ...assets]) > LIMITS.totalAssetBytes
   ) {
     throw new SiteError(
       "invalid_manifest",
@@ -530,11 +537,7 @@ function validateInventory(
       "manifest inventory exceeds platform limits",
     );
   }
-  for (const path of [
-    runtime.server,
-    runtime.client,
-    ...runtime.styles,
-  ]) {
+  for (const path of [runtime.server, runtime.client]) {
     if (!source.some((file) => file.path === path)) {
       throw new SiteError(
         "invalid_manifest",
@@ -552,34 +555,65 @@ function validateInventory(
   }
   assertUniqueCanonical(source.map((file) => file.path), "source paths");
   assertUniqueCanonical(pages.map((page) => page.route), "page routes");
-  assertUniqueCanonical(assets.map((asset) => asset.urlPath), "asset URLs");
+  assertUniqueCanonical(
+    [...pages, ...assets].map((asset) => asset.urlPath),
+    "asset URLs",
+  );
   assertUniqueCanonical(
     [
       ...source.map((file) => file.path),
-      prompt.path,
-      catalog.path,
       ...pages.map((page) => page.path),
       ...assets.map((asset) => asset.path),
     ],
     "manifest paths",
   );
-  const routes = new Set(
-    pages.map((page) => caseFoldedPath(page.route)),
-  );
   for (const asset of assets) {
     if (
-      routes.has(caseFoldedPath(asset.urlPath)) ||
       asset.urlPath === RESERVED_URL_PREFIX ||
       asset.urlPath.startsWith(`${RESERVED_URL_PREFIX}/`)
     ) {
       throw new SiteError(
         "invalid_manifest",
         "manifest",
-        `asset URL conflicts with a page route: ${asset.urlPath}`,
+        `asset URL uses the reserved runtime prefix: ${asset.urlPath}`,
       );
     }
   }
-  assertConsistentIdentity([...source, prompt, catalog, ...pages, ...assets]);
+  const clientUrlPath = clientBundleUrlPath(runtime.client);
+  if (!isUrlPath(clientUrlPath)) {
+    throw new SiteError(
+      "invalid_configuration",
+      "configuration",
+      `runtime client produces an unsafe asset URL: ${clientUrlPath}`,
+    );
+  }
+  if (
+    [...pages, ...assets].some(
+      (asset) =>
+        caseFoldedPath(asset.urlPath) === caseFoldedPath(clientUrlPath),
+    )
+  ) {
+    throw new SiteError(
+      "invalid_configuration",
+      "configuration",
+      `runtime client conflicts with a static asset URL: ${clientUrlPath}`,
+    );
+  }
+  const runtimeAssetUrls = new Set(
+    [clientUrlPath, ...assets.map((asset) => asset.urlPath)].map(
+      caseFoldedPath,
+    ),
+  );
+  for (const page of pages) {
+    if (runtimeAssetUrls.has(caseFoldedPath(page.route))) {
+      throw new SiteError(
+        "invalid_page",
+        "page",
+        `page route conflicts with a runtime asset: ${page.route}`,
+      );
+    }
+  }
+  assertConsistentIdentity([...source, ...pages, ...assets]);
 }
 
 function assertUniqueCanonical(values: string[], label: string) {
@@ -647,44 +681,26 @@ export async function createManifest(
   );
   const dependencyDigest = digestCanonical({ direct, packages });
 
-  const codePaths = await inventory(root, "src");
+  const codePaths = (await inventory(root, "src")).filter(
+    (path) =>
+      !path.endsWith(".test.ts") &&
+      !path.endsWith(".test.tsx") &&
+      !path.endsWith(".css"),
+  );
   const codeFiles = await Promise.all(
     codePaths.map((path) =>
       sourceEntry(root, path, LIMITS.sourceFileBytes),
     ),
   );
-  const catalogEntry = await sourceEntry(
-    root,
-    "generated/openui-catalog.json",
-    LIMITS.catalogBytes,
-  );
-  const catalog = {
-    ...catalogEntry,
-    path: "generated/openui-catalog.json" as const,
-    catalogDigest: digestCanonical(
-      JSON.parse(await readFile(resolve(root, "generated/openui-catalog.json"), "utf8")),
-    ),
-  };
   const bundleDigest = digestCanonical({
     runtime,
     dependencyDigest,
-    catalogDigest: catalog.catalogDigest,
     files: codeFiles
       .slice()
       .sort((left, right) => compareCodePoints(left.path, right.path))
       .map(fileDigestInput),
   });
 
-  const promptEntry = await sourceEntry(
-    root,
-    "generated/openui-system-prompt.txt",
-    LIMITS.promptBytes,
-  );
-  const prompt = {
-    ...promptEntry,
-    path: "generated/openui-system-prompt.txt" as const,
-    promptDigest: promptEntry.sha256,
-  };
   const pagePaths = await inventory(root, "pages");
   if (pagePaths.some((path) => !path.endsWith(".openui"))) {
     throw new SiteError(
@@ -698,14 +714,22 @@ export async function createManifest(
       pagePaths.map(async (path) => ({
         ...(await sourceEntry(root, path, LIMITS.pageBytes)),
         route: routeForPage(path),
+        urlPath: urlPathForPage(path),
       })),
     )
   ).sort((left, right) => compareCodePoints(left.route, right.route));
 
+  const assetPaths = [
+    "src/styles.css",
+    ...(await inventory(root, "assets")),
+  ];
   const assets = (
     await Promise.all(
-      (await inventory(root, "assets")).map(async (path) => {
-        const urlPath = `/assets/${path.slice("assets/".length)}`;
+      assetPaths.map(async (path) => {
+        const urlPath =
+          path === "src/styles.css"
+            ? "/styles.css"
+            : `/assets/${path.slice("assets/".length)}`;
         if (!isUrlPath(urlPath)) {
           throw new SiteError(
             "invalid_manifest",
@@ -724,13 +748,16 @@ export async function createManifest(
     )
   ).sort((left, right) => compareCodePoints(left.urlPath, right.urlPath));
 
-  validateInventory(runtime, codeFiles, prompt, catalog, pages, assets);
+  validateInventory(runtime, codeFiles, pages, assets);
+  const allAssets: AssetEntry[] = [
+    ...pages.map(({ route: _route, ...page }) => {
+      void _route;
+      return { ...page, contentType: "text/plain; charset=utf-8" };
+    }),
+    ...assets,
+  ].sort((left, right) => compareCodePoints(left.urlPath, right.urlPath));
   const contentDigest = digestCanonical({
-    pages: pages.map(({ route, ...file }) => ({
-      route,
-      ...fileDigestInput(file),
-    })),
-    assets: assets.map(({ urlPath, contentType, ...file }) => ({
+    assets: allAssets.map(({ urlPath, contentType, ...file }) => ({
       urlPath,
       contentType,
       ...fileDigestInput(file),
@@ -740,8 +767,6 @@ export async function createManifest(
     schemaVersion: 2,
     gitObjectFormat: "sha1",
     bundleDigest,
-    promptDigest: prompt.promptDigest,
-    catalogDigest: catalog.catalogDigest,
     contentDigest,
   });
 
@@ -751,10 +776,7 @@ export async function createManifest(
     runtime,
     dependencies: { dependencyDigest, direct, packages },
     code: { bundleDigest, files: codeFiles },
-    prompt,
-    catalog,
-    pages,
-    assets,
+    assets: allAssets,
     contentDigest,
     deploymentDigest,
   };
