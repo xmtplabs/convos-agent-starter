@@ -10,7 +10,7 @@ import {
   type QueryStatementInfo,
 } from "@openuidev/lang-core";
 import { Renderer } from "@openuidev/react-lang";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup } from "react-dom/server.edge";
 import { fixtureTools } from "./fixtures.js";
 import { library } from "./library.js";
 import {
